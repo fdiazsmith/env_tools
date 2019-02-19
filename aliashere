@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+ALIAS_NAME=$1
+
+echo 'alias '$ALIAS_NAME'="cd '$PWD'"' >> $HOME/.zshrc

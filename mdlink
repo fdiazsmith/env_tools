@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+URL=$1
+DESCRIPTION=$2
+FILE=$3
+
+echo "- [${DESCRIPTION}](${URL})" >> $FILE
