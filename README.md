@@ -53,3 +53,4 @@ If you developed a new script and want to make it global, from the directory whe
 ```bash
 install-local my-script
 ```
+- [check if directory exist](https://tecadmin.net/bash-shell-test-if-file-or-directory-exists/)
