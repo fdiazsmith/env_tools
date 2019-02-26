@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+RED=`tput setaf 1`
+GREEN=`tput setaf 2`
+NOCOLOR=`tput sgr0`
+
+
+FILE_PATH=$PWD
+
+# echo ${PWD/#$HOME/'~'}
+
+echo -e "Removing  ${RED}"$1"${NOCOLOR} from the local bin folder" 
+
+sed -i -e 's/'$1'//g' installed_scripts
+
+cd /usr/local/bin/
+
+rm $1
+
