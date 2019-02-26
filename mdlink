@@ -2,5 +2,12 @@
 URL=$1
 DESCRIPTION=$2
 FILE=$3
+if [$FILE = ""]; then
+  FILE="README.md"
+fi
 
 echo "- [${DESCRIPTION}](${URL})" >> $FILE
+
+if [ -d ./.git ]; then
+    git add $FILE && git commit $FILE -m "Added quick mark down link"
+fi
