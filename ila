@@ -1,32 +1,47 @@
 #!/usr/bin/env python
-
+# https://docs.python.org/3/library/argparse.html
 import sys, getopt, subprocess
+import argparse
+import os
+
+parser = argparse.ArgumentParser(prog='ila', usage='%(prog)s [options] type -h for help')
+parser.add_argument("-p5", "--processing",   help="name of the sketch you would like to create")
+# parser.add_argument("--port", type=int, default=5005, help="The port the OSC server is listening on")
+
+args = parser.parse_args()
 
 def main(argv):
    inputfile = ''
    outputfile = ''
-   try:
-       opts, args = getopt.getopt(argv,"hli:o:",["ifile=","ofile="])
-   except getopt.GetoptError:
-      print 'test.py -i <inputfile> -o <outputfile>'
-      sys.exit(2)
-   for opt, arg in opts:
-      if opt == '-h':
-         print 'test.py -i <inputfile> -o <outputfile>'
-         sys.exit()
-      elif opt in ("-i", "--ifile"):
-         inputfile = arg
-      elif opt in ("-o", "--ofile"):
-         outputfile = arg
-      elif opt in ("-l", "--sym-link" ):
-          bashCommand = "bash ./othertest"
-          process = subprocess.Popen(bashCommand.split(), stdout=subprocess.PIPE)
-          output, error = process.communicate()
-          print output
-          print error
+   if args.processing:
+       os.system("~/.my_bash_scripts/processing  %s" %args.processing )
+       # print("sweet creating your sketch now")
+       # bashCommand = "python ~/.my_bash_scripts/processing"
+       # process = subprocess.Popen(bashCommand.split(), stdout=subprocess.PIPE)
+       # output, error = process.communicate()
+       # print output
+       # print error
 
-   print 'Input file is "', inputfile
-   print 'Output file is "', outputfile
+   # try:
+   #     opts, args = getopt.getopt(argv,"hli:o:",["ifile=","ofile="])
+   # except getopt.GetoptError:
+   #    print 'test.py -i <inputfile> -o <outputfile>'
+   #    sys.exit(2)
+   # for opt, arg in opts:
+   #    if opt == '-h':
+   #       print 'test.py -i <inputfile> -o <outputfile>'
+   #       sys.exit()
+   #    elif opt in ("-i", "--ifile"):
+   #       inputfile = arg
+   #    elif opt in ("-o", "--ofile"):
+   #       outputfile = arg
+   #    elif opt in ("-l", "--sym-link" ):
+   #        bashCommand = "bash ./othertest"
+   #        process = subprocess.Popen(bashCommand.split(), stdout=subprocess.PIPE)
+   #        output, error = process.communicate()
+   #        print output
+   #        print error
+
 
 if __name__ == "__main__":
    main(sys.argv[1:])
