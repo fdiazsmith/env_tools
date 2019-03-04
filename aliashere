@@ -1,4 +1,21 @@
 #!/usr/bin/env bash
-ALIAS_NAME=$1
 
-echo 'alias '$ALIAS_NAME'="cd '$PWD'"' >> $HOME/.zshrc
+if [ $1 == "-rm" ]; then
+  if [ $2 == "" ]; then
+    ALIAS_NAME=${PWD##*/}
+  else
+    ALIAS_NAME=$2
+  fi
+  echo "deleting "$ALIAS_NAME" alias"
+  sed -i -e '/'$ALIAS_NAME'/d' $HOME/.zshrc
+
+else
+  if [ $1 == "" ]; then
+    ALIAS_NAME=${PWD##*/}
+  else
+    ALIAS_NAME=$1
+  fi
+  echo "creating "$ALIAS_NAME" alias"
+
+  echo 'alias '$ALIAS_NAME'="cd '$PWD'"' >> $HOME/.zshrc
+fi
