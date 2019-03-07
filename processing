@@ -6,6 +6,8 @@ import sys, getopt, subprocess
 import argparse
 # import requests
 import os, glob
+import shutil
+
 
 parser = argparse.ArgumentParser(prog='basic processing sketch', usage='%(prog)s [options] type -h for help')
 parser.add_argument("projectName",   help="name of the sketch you would like to create")
@@ -17,7 +19,8 @@ print('\nCreating %s'  %args.projectName )
 ORIGINAL_NAME = "Plotter"
 
 
-includeRepo = raw_input("\nWould you like to include a .git repo? [y/n] ")
+includeRepo = raw_input("\nAdd a .git repo? [y/n] (default is no ) ")
+className = raw_input("\nClassname? (default Canvas) ")
 
 
 
@@ -37,22 +40,34 @@ def rename( ):
         # src = os.path.realpath(ORIGINAL_NAME);
         # print("what is the real path %s" %src)
         os.rename( ORIGINAL_NAME, args.projectName )
-    for filename in os.listdir(args.projectName):
-        if filename.startswith(ORIGINAL_NAME):
-            title, ext = os.path.splitext(filename)
-            print("found match %s" %os.path.join(args.projectName, args.projectName + ext))
-            os.rename(os.path.join(args.projectName, filename), os.path.join(args.projectName, args.projectName + ext))
-            # os.rename(filename, args.projectName)
+        for filename in os.listdir(args.projectName):
+            if filename.startswith(ORIGINAL_NAME):
+                title, ext = os.path.splitext(filename)
+                print("found match %s" %os.path.join(args.projectName, args.projectName + ext))
+                os.rename(os.path.join(args.projectName, filename), os.path.join(args.projectName, args.projectName + ext))
+                # os.rename(filename, args.projectName)
 	# rename the original file
 
+def removeGit():
+    shutil.rmtree(os.path.join(args.projectName, ".git"), ignore_errors=True)
 
+def addGit():
+    bashCommand = "cd "+args.projectName+" && git init"
+    process = subprocess.Popen(bashCommand.split(), stdout=subprocess.PIPE)
+    output, error = process.communicate()
+    print output
+    print error
 
 def quit():
     pass
 
 if __name__ == "__main__":
     try:
-        # cloneRepo();
+        cloneRepo()
         rename()
+        removeGit()
+        if includeRepo == "y":
+            addGit()
+
     except KeyboardInterrupt:
         quit()
