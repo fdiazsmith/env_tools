@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
+IN_GIT_DIR=$(git rev-parse)
 
-if [ -d ./.git ]; then
+if [ -z "$IN_GIT_DIR" ]; then
     URL=$(git remote -v | grep fetch | sed 's/origin//' | sed 's/(fetch)//')
     echo "Opening url "$URL
     open $URL
