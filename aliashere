@@ -16,8 +16,9 @@ else
     ALIAS_NAME=$1
   fi
   # escape spaces
-  ALIAS_PATH = $($PWD | sed 's/ /\\ /g')
-  echo "creating "$ALIAS_NAME" alias"
+  ALIAS_PATH=$($PWD | sed 's/ /\\ /g')
+  echo "creating "$ALIAS_NAME" alias pointing to " $PWD 
 
-  echo 'alias '$ALIAS_NAME'="cd '$ALIAS_PATH'"' >> $HOME/.zshrc
+  echo "alias "$ALIAS_NAME="'cd \"$PWD\"'" >> $HOME/.zshrc
+
 fi
