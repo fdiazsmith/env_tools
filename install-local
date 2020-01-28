@@ -10,7 +10,7 @@ FILE_PATH=$PWD
 # echo ${PWD/#$HOME/'~'}
 
 echo -e "Adding  ${RED}"$1"${NOCOLOR} located in  ${RED}"$FILE_PATH"${NOCOLOR} to the local bin folder" 
-echo $1 >> $HOME/.my_bash_scripts/installed_scripts
+echo $1 >> $HOME/.env_tools/installed_scripts
 chmod a+x $1
 cd /usr/local/bin/
 
