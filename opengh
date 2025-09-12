@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+
+# Check if we're in a git repository
+if ! git rev-parse --git-dir > /dev/null 2>&1; then
+    echo "Error: Not in a git repository"
+    exit 1
+fi
+
+# Get the remote URL
+RAW_URL=$(git remote get-url origin 2>/dev/null)
+
+if [ -z "$RAW_URL" ]; then
+    echo "Error: No origin remote found"
+    exit 1
+fi
+
+# Convert SSH URL to HTTPS format
+if [[ $RAW_URL == git@* ]]; then
+    # Parse SSH format: git@github.com:user/repo.git
+    # Extract host, user, and repo
+    HOST=$(echo "$RAW_URL" | sed 's/git@\([^:]*\):.*/\1/')
+    USER_REPO=$(echo "$RAW_URL" | sed 's/git@[^:]*:\(.*\)/\1/')
+    # Remove .git extension if present
+    USER_REPO=$(echo "$USER_REPO" | sed 's/\.git$//')
+    URL="https://$HOST/$USER_REPO"
+elif [[ $RAW_URL == https://* ]]; then
+    # Already HTTPS, just remove .git if present
+    URL=$(echo "$RAW_URL" | sed 's/\.git$//')
+else
+    echo "Error: Unsupported URL format: $RAW_URL"
+    exit 1
+fi
+
+echo "Opening URL: $URL"
+open "$URL"
