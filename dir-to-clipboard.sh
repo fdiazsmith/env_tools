@@ -101,6 +101,8 @@ display_help() {
     echo "  -i, --ignore <pattern>   Ignore entries matching the specified pattern (can be used multiple times)"
     echo "      --match <pattern>    Include only files matching the specified pattern (can be used multiple times)"
     echo "  -m, --min                Remove whitespace and carriage returns from the output"
+    echo "  -s, --structure-only [dirs...] Copy only the directory structure without file contents"
+    echo "                           Optionally specify directories to exclude (e.g., -s node_modules .turbo)"
     echo "  -h, --help               Display this help message"
     echo
 }
@@ -109,6 +111,7 @@ display_help() {
 ignore_patterns=()
 match_patterns=()
 minify_output=false
+structure_only=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -126,6 +129,15 @@ while [[ $# -gt 0 ]]; do
         -m|--min)
             minify_output=true
             shift
+            ;;
+        -s|--structure-only)
+            structure_only=true
+            shift
+            # Collect all following arguments that don't start with - as directories to ignore
+            while [[ $# -gt 0 && ! "$1" =~ ^- ]]; do
+                ignore_patterns+=("$1")
+                shift
+            done
             ;;
         -h|--help)
             display_help
@@ -145,12 +157,18 @@ current_dir=$(get_absolute_path ".")
 # Analyze the current directory and print structure
 output=$(print_structure "$current_dir" "" "${ignore_patterns[@]}")
 
-# Print text file contents
-text_contents=$(print_text_files "$current_dir" "${ignore_patterns[@]}")
+# Only include text file contents if not in structure-only mode
+if [[ "$structure_only" == false ]]; then
+    # Print text file contents
+    text_contents=$(print_text_files "$current_dir" "${ignore_patterns[@]}")
 
-# Combine structure and text contents
-final_output="$output
+    # Combine structure and text contents
+    final_output="$output
 $text_contents"
+else
+    # Structure only - no text contents
+    final_output="$output"
+fi
 
 # Minify the output if requested
 if [[ "$minify_output" == true ]]; then

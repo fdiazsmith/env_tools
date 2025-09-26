@@ -1,24 +1,191 @@
 #!/usr/bin/env bash
 
-if [ $1 == "-rm" ]; then
-  if [ $2 == "" ]; then
-    ALIAS_NAME=${PWD##*/}
-  else
-    ALIAS_NAME=$2
-  fi
-  echo "deleting "$ALIAS_NAME" alias"
-  sed -i -e '/'$ALIAS_NAME'/d' $HOME/.zshrc
+# Enhanced alias here script with parameter options
 
-else
-  if [ $1 == "" ]; then
-    ALIAS_NAME=${PWD##*/}
-  else
-    ALIAS_NAME=$1
-  fi
-  # escape spaces
-  ALIAS_PATH=$($PWD | sed 's/ /\\ /g')
-  echo "creating "$ALIAS_NAME" alias pointing to " $PWD 
+# Color codes for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
 
-  echo "alias "$ALIAS_NAME="'cd \"$PWD\"'" >> $HOME/.zshrc
+# Function to show help
+show_help() {
+    cat << EOF
+Usage: aliashere [OPTIONS] [alias_name]
 
-fi
+Create directory aliases in your .zshrc file
+
+OPTIONS:
+    --list          List all directory aliases created by aliashere
+    --delete NAME   Delete an existing alias
+    --update NAME   Update an existing alias to current directory
+    --help          Show this help message
+
+When no options are provided:
+    aliashere           Creates alias with current directory name
+    aliashere NAME      Creates alias with specified name
+
+EXAMPLES:
+    aliashere                  # Creates alias using current directory name
+    aliashere myproject        # Creates alias 'myproject' for current directory
+    aliashere --list           # Shows all aliases created
+    aliashere --delete myalias # Removes the alias 'myalias'
+    aliashere --update myalias # Updates 'myalias' to point to current directory
+
+EOF
+}
+
+# Function to check if alias exists
+alias_exists() {
+    local alias_name=$1
+    grep -q "^alias $alias_name=" "$HOME/.zshrc" 2>/dev/null
+}
+
+# Function to check if location is already aliased
+location_exists() {
+    local current_path=$1
+    # Escape special characters for grep
+    local escaped_path=$(echo "$current_path" | sed 's/[[\.*^$()+?{|]/\\&/g')
+    grep -q "cd \"$escaped_path\"" "$HOME/.zshrc" 2>/dev/null
+}
+
+# Function to get alias for current location if exists
+get_alias_for_location() {
+    local current_path=$1
+    local escaped_path=$(echo "$current_path" | sed 's/[[\.*^$()+?{|]/\\&/g')
+    grep "cd \"$escaped_path\"" "$HOME/.zshrc" 2>/dev/null | sed -n 's/^alias \([^=]*\)=.*/\1/p'
+}
+
+# Function to list all aliases
+list_aliases() {
+    echo -e "${GREEN}Directory aliases created by aliashere:${NC}"
+    echo "----------------------------------------"
+
+    # Extract aliases with 'cd' commands from .zshrc
+    local aliases=$(grep "^alias.*='cd \"" "$HOME/.zshrc" 2>/dev/null)
+
+    if [ -z "$aliases" ]; then
+        echo "No directory aliases found."
+    else
+        while IFS= read -r line; do
+            # Extract alias name and path
+            alias_name=$(echo "$line" | sed -n 's/^alias \([^=]*\)=.*/\1/p')
+            alias_path=$(echo "$line" | sed -n "s/^alias.*='cd \"\([^\"]*\)\".*/\1/p")
+
+            # Check if directory still exists
+            if [ -d "$alias_path" ]; then
+                echo -e "${GREEN}$alias_name${NC} → $alias_path"
+            else
+                echo -e "${RED}$alias_name${NC} → $alias_path ${YELLOW}(directory not found)${NC}"
+            fi
+        done <<< "$aliases"
+    fi
+}
+
+# Function to delete alias
+delete_alias() {
+    local alias_name=$1
+
+    if [ -z "$alias_name" ]; then
+        echo -e "${RED}Error: Please specify an alias name to delete${NC}"
+        echo "Usage: aliashere --delete NAME"
+        exit 1
+    fi
+
+    if alias_exists "$alias_name"; then
+        # Use different sed syntax for macOS vs Linux
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "/^alias $alias_name=/d" "$HOME/.zshrc"
+        else
+            sed -i "/^alias $alias_name=/d" "$HOME/.zshrc"
+        fi
+        echo -e "${GREEN}✓ Deleted alias '$alias_name'${NC}"
+    else
+        echo -e "${YELLOW}Warning: Alias '$alias_name' does not exist${NC}"
+        exit 1
+    fi
+}
+
+# Function to create or update alias
+create_or_update_alias() {
+    local alias_name=$1
+    local update_mode=$2
+    local current_path="$PWD"
+
+    # Use current directory name if no alias name provided
+    if [ -z "$alias_name" ]; then
+        alias_name=${PWD##*/}
+    fi
+
+    # Check if alias already exists
+    if alias_exists "$alias_name"; then
+        if [ "$update_mode" != "true" ]; then
+            echo -e "${RED}Error: Alias '$alias_name' already exists${NC}"
+            echo -e "Use ${YELLOW}--update${NC} to update it or choose a different name"
+            exit 1
+        else
+            # Delete old alias before creating new one
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                sed -i '' "/^alias $alias_name=/d" "$HOME/.zshrc"
+            else
+                sed -i "/^alias $alias_name=/d" "$HOME/.zshrc"
+            fi
+            echo -e "${GREEN}✓ Updated alias '$alias_name' to point to $current_path${NC}"
+        fi
+    else
+        if [ "$update_mode" == "true" ]; then
+            echo -e "${YELLOW}Warning: Alias '$alias_name' does not exist. Creating new alias...${NC}"
+        fi
+    fi
+
+    # Check if location is already aliased
+    existing_alias=$(get_alias_for_location "$current_path")
+    if [ -n "$existing_alias" ] && [ "$existing_alias" != "$alias_name" ]; then
+        echo -e "${YELLOW}Warning: This location is already aliased as '$existing_alias'${NC}"
+        echo -e "Do you want to create another alias for the same location? (y/n)"
+        read -r response
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            echo "Alias creation cancelled"
+            exit 0
+        fi
+    fi
+
+    # Create the alias
+    echo "alias $alias_name='cd \"$current_path\"'" >> "$HOME/.zshrc"
+
+    if [ "$update_mode" != "true" ]; then
+        echo -e "${GREEN}✓ Created alias '$alias_name' pointing to $current_path${NC}"
+    fi
+
+    echo -e "${YELLOW}Note: Run 'source ~/.zshrc' or restart your terminal to use the new alias${NC}"
+}
+
+# Main script logic
+case "$1" in
+    --help|-h)
+        show_help
+        exit 0
+        ;;
+    --list|-l)
+        list_aliases
+        exit 0
+        ;;
+    --delete|-d)
+        delete_alias "$2"
+        exit 0
+        ;;
+    --update|-u)
+        create_or_update_alias "$2" "true"
+        exit 0
+        ;;
+    -*)
+        echo -e "${RED}Error: Unknown option '$1'${NC}"
+        show_help
+        exit 1
+        ;;
+    *)
+        # Default behavior - create alias
+        create_or_update_alias "$1" "false"
+        exit 0
+        ;;
+esac
