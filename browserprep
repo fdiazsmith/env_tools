@@ -1,0 +1,584 @@
+#!/usr/bin/env python3
+
+import argparse
+import subprocess
+import sys
+import time
+import termios
+import tty
+import os
+import select
+from typing import Tuple, Optional
+
+class BrowserPrep:
+    """Chrome window management utility for preparing browser windows for demos and screenshots."""
+
+    PRESET_SIZES = {
+        'laptop': (1440, 900),
+        'desktop': (1920, 1080),
+        'ultrawide': (2560, 1440),
+        'mobile': (414, 896),
+        'tablet': (1024, 768),
+        'small': (1280, 720),
+        'medium': (1600, 900),
+        'large': (1920, 1200),
+        'presentation': (1920, 1080)
+    }
+
+    def __init__(self):
+        self.menu_bar_height = 23  # macOS menu bar height
+
+    def get_key(self):
+        """Get a single key press from the terminal."""
+        try:
+            fd = sys.stdin.fileno()
+
+            # Check if stdin is a tty (not a pipe or redirect)
+            if not os.isatty(fd):
+                # Fallback for non-tty input
+                key = sys.stdin.read(1)
+                if key == 'q' or key == 'Q':
+                    return 'QUIT'
+                elif key == '\n':
+                    return 'ENTER'
+                return key.upper() if key.isalpha() else key
+
+            old_settings = termios.tcgetattr(fd)
+            try:
+                tty.setraw(fd)
+                key = sys.stdin.read(1)
+
+                # Handle arrow keys (escape sequences)
+                if key == '\x1b':  # ESC sequence
+                    # Read the bracket
+                    bracket = sys.stdin.read(1)
+                    if bracket == '[':
+                        # Read the direction key
+                        direction = sys.stdin.read(1)
+                        if direction == 'A':  # Up arrow
+                            return 'UP'
+                        elif direction == 'B':  # Down arrow
+                            return 'DOWN'
+                        elif direction == 'C':  # Right arrow
+                            return 'RIGHT'
+                        elif direction == 'D':  # Left arrow
+                            return 'LEFT'
+                    return 'ESC'
+                elif key == '\r' or key == '\n':  # Enter
+                    return 'ENTER'
+                elif key == 'q' or key == 'Q':  # Quit
+                    return 'QUIT'
+                elif key == '\x03':  # Ctrl+C
+                    return 'QUIT'
+                elif key == ' ':  # Space
+                    return 'ENTER'
+                elif key.isdigit():
+                    return key
+
+                return key.upper() if key.isalpha() else key
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        except (termios.error, OSError):
+            # Fallback if terminal operations fail
+            try:
+                key = input()
+                if key.lower() == 'q':
+                    return 'QUIT'
+                return key.upper()
+            except (EOFError, KeyboardInterrupt):
+                return 'QUIT'
+
+    def clear_screen(self):
+        """Clear the terminal screen."""
+        os.system('clear')
+
+    def print_menu(self, selected_index: int, options: list):
+        """Print the menu with highlighted selection."""
+        self.clear_screen()
+
+        print("🌐 BrowserPrep - Interactive Mode")
+        print("=" * 40)
+        print()
+
+        # Show current window info
+        if self.is_chrome_running():
+            info = self.get_current_window_info()
+            if info:
+                print(f"Current: {info['width']}x{info['height']} at ({info['x']}, {info['y']})")
+            else:
+                print("Current: Unable to get window info")
+        else:
+            print("Current: Chrome not running")
+
+        print()
+        print("Select a window size option:")
+        print("━" * 40)
+
+        for i, option in enumerate(options):
+            if i == selected_index:
+                print(f"► {option['display']}")  # Selected item
+            else:
+                print(f"  {option['display']}")  # Unselected item
+
+        print()
+        print("Use ↑↓ arrows to navigate, ENTER to select, Q to quit")
+
+    def run_applescript(self, script: str) -> Optional[str]:
+        """Execute AppleScript and return output."""
+        try:
+            result = subprocess.run(
+                ['osascript', '-e', script],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            return result.stdout.strip()
+        except subprocess.CalledProcessError as e:
+            print(f"Error executing AppleScript: {e.stderr}", file=sys.stderr)
+            return None
+
+    def is_chrome_running(self) -> bool:
+        """Check if Chrome is running."""
+        try:
+            result = subprocess.run(['pgrep', '-x', 'Google Chrome'], capture_output=True)
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def get_most_recent_chrome_window(self) -> bool:
+        """Activate the most recently used Chrome window."""
+        script = '''
+        tell application "Google Chrome"
+            if (count of windows) > 0 then
+                activate
+                set index of window 1 to 1
+                return true
+            else
+                return false
+            end if
+        end tell
+        '''
+        result = self.run_applescript(script)
+        return result == "true"
+
+    def resize_chrome_window(self, width: int, height: int, x: int = 0, y: int = None) -> bool:
+        """Resize the most recent Chrome window to specified dimensions."""
+        if y is None:
+            y = self.menu_bar_height
+
+        # Calculate bottom-right coordinates
+        right = x + width
+        bottom = y + height
+
+        script = f'''
+        tell application "Google Chrome"
+            if (count of windows) > 0 then
+                activate
+                tell window 1
+                    set bounds to {{{x}, {y}, {right}, {bottom}}}
+                end tell
+                return true
+            else
+                return false
+            end if
+        end tell
+        '''
+
+        result = self.run_applescript(script)
+        return result == "true"
+
+    def get_current_window_info(self) -> Optional[dict]:
+        """Get current Chrome window dimensions and position."""
+        script = '''
+        tell application "Google Chrome"
+            if (count of windows) > 0 then
+                tell window 1
+                    set windowBounds to bounds
+                    set windowWidth to (item 3 of windowBounds) - (item 1 of windowBounds)
+                    set windowHeight to (item 4 of windowBounds) - (item 2 of windowBounds)
+                    return (item 1 of windowBounds) & "," & (item 2 of windowBounds) & "," & windowWidth & "," & windowHeight
+                end tell
+            else
+                return "no_window"
+            end if
+        end tell
+        '''
+
+        result = self.run_applescript(script)
+        if result and result != "no_window":
+            try:
+                x, y, width, height = map(int, result.split(','))
+                return {
+                    'x': x,
+                    'y': y,
+                    'width': width,
+                    'height': height,
+                    'bounds': f"{x},{y},{x+width},{y+height}"
+                }
+            except ValueError:
+                return None
+        return None
+
+    def launch_chrome_with_size(self, width: int, height: int) -> bool:
+        """Launch Chrome with specified window size."""
+        try:
+            subprocess.run([
+                'open', '-n', '-a', 'Google Chrome', '--args',
+                '--disable-web-security',
+                '--user-data-dir=/tmp/ChromeDevSession',
+                f'--window-size={width},{height}',
+                '--window-position=0,0'
+            ], check=True)
+
+            # Wait for Chrome to launch
+            time.sleep(3)
+            return self.get_most_recent_chrome_window()
+        except subprocess.CalledProcessError:
+            return False
+
+    def parse_size(self, size_str: str) -> Tuple[int, int]:
+        """Parse size string in format 'WIDTHxHEIGHT' or 'WIDTH,HEIGHT'."""
+        # Handle both 'x' and ',' separators
+        if 'x' in size_str:
+            width, height = size_str.split('x', 1)
+        elif ',' in size_str:
+            width, height = size_str.split(',', 1)
+        else:
+            raise ValueError("Size must be in format 'WIDTHxHEIGHT' or 'WIDTH,HEIGHT'")
+
+        try:
+            return int(width.strip()), int(height.strip())
+        except ValueError:
+            raise ValueError("Width and height must be integers")
+
+    def show_presets(self):
+        """Display available preset sizes."""
+        print("Available preset sizes:")
+        print("-" * 40)
+        for name, (width, height) in sorted(self.PRESET_SIZES.items()):
+            print(f"{name:12} : {width}x{height}")
+
+    def show_current_info(self):
+        """Show current Chrome window information."""
+        if not self.is_chrome_running():
+            print("Chrome is not running.")
+            return
+
+        info = self.get_current_window_info()
+        if info:
+            print(f"Current Chrome window:")
+            print(f"  Position: {info['x']}, {info['y']}")
+            print(f"  Size: {info['width']}x{info['height']}")
+            print(f"  Bounds: {info['bounds']}")
+        else:
+            print("Could not get Chrome window information.")
+
+    def interactive_mode(self):
+        """Run interactive mode with keyboard navigation."""
+        # Check Chrome status first
+        if not self.is_chrome_running():
+            self.clear_screen()
+            print("🌐 BrowserPrep - Interactive Mode")
+            print("=" * 40)
+            print()
+            print("Chrome is not running.")
+            print()
+            print("Press ENTER to launch Chrome, or Q to quit: ", end='', flush=True)
+
+            while True:
+                key = self.get_key()
+                if key == 'ENTER':
+                    print("\nLaunching Chrome...")
+                    if not self.launch_chrome_with_size(*self.PRESET_SIZES['desktop']):
+                        print("Failed to launch Chrome. Exiting.")
+                        return False
+                    time.sleep(1)
+                    break
+                elif key == 'QUIT':
+                    print("\n👋 Goodbye!")
+                    return True
+
+        # Prepare menu options
+        options = []
+
+        # Add preset sizes
+        for name, (width, height) in sorted(self.PRESET_SIZES.items()):
+            options.append({
+                'type': 'preset',
+                'name': name,
+                'size': (width, height),
+                'display': f"{name:12} ({width}x{height})"
+            })
+
+        # Add custom size option
+        options.append({
+            'type': 'custom',
+            'display': "Custom size    (enter your own)"
+        })
+
+        # Add info option
+        options.append({
+            'type': 'info',
+            'display': "Show info      (current window details)"
+        })
+
+        # Add quit option
+        options.append({
+            'type': 'quit',
+            'display': "Quit           (exit program)"
+        })
+
+        selected_index = 0
+
+        while True:
+            # Print menu
+            self.print_menu(selected_index, options)
+
+            # Get user input
+            key = self.get_key()
+
+            if key == 'UP':
+                selected_index = (selected_index - 1) % len(options)
+            elif key == 'DOWN':
+                selected_index = (selected_index + 1) % len(options)
+            elif key == 'ENTER':
+                selected_option = options[selected_index]
+
+                if selected_option['type'] == 'preset':
+                    # Resize to preset size
+                    width, height = selected_option['size']
+                    name = selected_option['name']
+
+                    self.clear_screen()
+                    print(f"Resizing to {name}: {width}x{height}...")
+
+                    if self.resize_chrome_window(width, height):
+                        print(f"✓ Successfully resized to {width}x{height}")
+                        # Show final window info
+                        time.sleep(0.5)
+                        info = self.get_current_window_info()
+                        if info:
+                            print(f"Final window: {info['width']}x{info['height']} at ({info['x']}, {info['y']})")
+                    else:
+                        print("❌ Failed to resize window")
+
+                    print("\n👋 Done!")
+                    return True
+
+                elif selected_option['type'] == 'custom':
+                    # Handle custom size input
+                    self.clear_screen()
+                    print("Enter custom size:")
+                    print("Format: WIDTHxHEIGHT or WIDTH,HEIGHT")
+                    print("Example: 1920x1080 or 1920,1080")
+                    print()
+
+                    # Restore normal terminal input for size entry
+                    try:
+                        size_input = input("Size: ").strip()
+                        width, height = self.parse_size(size_input)
+
+                        print(f"\nResizing to custom size: {width}x{height}...")
+
+                        if self.resize_chrome_window(width, height):
+                            print(f"✓ Successfully resized to {width}x{height}")
+                            # Show final window info
+                            time.sleep(0.5)
+                            info = self.get_current_window_info()
+                            if info:
+                                print(f"Final window: {info['width']}x{info['height']} at ({info['x']}, {info['y']})")
+                        else:
+                            print("❌ Failed to resize window")
+
+                        print("\n👋 Done!")
+                        return True
+
+                    except ValueError as e:
+                        print(f"❌ Error: {e}")
+                        print("Please try again with a valid size format.")
+                        print("\nPress any key to continue...")
+                        self.get_key()
+                        continue
+
+                elif selected_option['type'] == 'info':
+                    # Show current window info
+                    self.clear_screen()
+                    print("Current Chrome Window Information:")
+                    print("=" * 40)
+                    self.show_current_info()
+                    print("\n👋 Done!")
+                    return True
+
+                elif selected_option['type'] == 'quit':
+                    self.clear_screen()
+                    print("👋 Goodbye!")
+                    return True
+
+            elif key == 'QUIT':
+                self.clear_screen()
+                print("👋 Goodbye!")
+                return True
+
+            # Handle numeric shortcuts
+            elif key.isdigit():
+                try:
+                    num = int(key) - 1
+                    if 0 <= num < len(options):
+                        selected_index = num
+                except ValueError:
+                    pass
+
+    def debug_keys(self):
+        """Debug mode to see what keys are being detected."""
+        print("Debug mode - press keys to see what's detected (q to quit):")
+        while True:
+            key = self.get_key()
+            print(f"Key detected: '{key}' (type: {type(key)})")
+            if key == 'QUIT':
+                break
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Prepare Chrome browser windows for demos and screenshots',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  browserprep                         # Interactive mode (default)
+  browserprep --size 1920x1080        # Set custom size
+  browserprep --preset desktop        # Use desktop preset
+  browserprep --list-presets          # Show available presets
+  browserprep --info                  # Show current window info
+  browserprep --size 1440,900         # Alternative size format
+        """
+    )
+
+    # Size options
+    size_group = parser.add_mutually_exclusive_group()
+    size_group.add_argument(
+        '--size', '-s',
+        help='Window size in format WIDTHxHEIGHT or WIDTH,HEIGHT (e.g., 1920x1080)'
+    )
+    size_group.add_argument(
+        '--preset', '-p',
+        choices=BrowserPrep.PRESET_SIZES.keys(),
+        help='Use a preset window size'
+    )
+
+    # Information options
+    parser.add_argument(
+        '--list-presets', '--list',
+        action='store_true',
+        help='List available preset sizes'
+    )
+    parser.add_argument(
+        '--info', '-i',
+        action='store_true',
+        help='Show current Chrome window information'
+    )
+
+    # Position options
+    parser.add_argument(
+        '--position', '-pos',
+        help='Window position in format X,Y (default: 0,23)'
+    )
+
+    # Launch options
+    parser.add_argument(
+        '--launch', '-l',
+        action='store_true',
+        help='Launch Chrome if not running'
+    )
+
+    # Debug option
+    parser.add_argument(
+        '--debug-keys',
+        action='store_true',
+        help='Debug keyboard input (for troubleshooting)'
+    )
+
+    args = parser.parse_args()
+
+    bp = BrowserPrep()
+
+    # If no arguments provided, run interactive mode
+    if len(sys.argv) == 1:
+        bp.interactive_mode()
+        return
+
+    # Handle information requests
+    if args.list_presets:
+        bp.show_presets()
+        return
+
+    if args.info:
+        bp.show_current_info()
+        return
+
+    # Handle debug mode
+    if args.debug_keys:
+        bp.debug_keys()
+        return
+
+    # Check if Chrome is running or should be launched
+    if not bp.is_chrome_running():
+        if args.launch or args.size or args.preset:
+            print("Chrome not running. Launching...")
+            # Use provided size or default
+            if args.size:
+                width, height = bp.parse_size(args.size)
+            elif args.preset:
+                width, height = bp.PRESET_SIZES[args.preset]
+            else:
+                width, height = bp.PRESET_SIZES['desktop']
+
+            if not bp.launch_chrome_with_size(width, height):
+                print("Failed to launch Chrome", file=sys.stderr)
+                sys.exit(1)
+        else:
+            print("Chrome is not running. Use --launch to start it, or start Chrome manually.")
+            sys.exit(1)
+
+    # Get window dimensions
+    width = height = None
+    if args.size:
+        try:
+            width, height = bp.parse_size(args.size)
+        except ValueError as e:
+            print(f"Error parsing size: {e}", file=sys.stderr)
+            sys.exit(1)
+    elif args.preset:
+        width, height = bp.PRESET_SIZES[args.preset]
+
+    # Get position
+    x, y = 0, bp.menu_bar_height
+    if args.position:
+        try:
+            x, y = map(int, args.position.split(','))
+        except ValueError:
+            print("Position must be in format X,Y", file=sys.stderr)
+            sys.exit(1)
+
+    # Resize window if dimensions provided
+    if width and height:
+        print(f"Resizing Chrome window to {width}x{height} at position {x},{y}...")
+
+        if not bp.get_most_recent_chrome_window():
+            print("Could not activate Chrome window", file=sys.stderr)
+            sys.exit(1)
+
+        time.sleep(0.5)  # Give Chrome time to activate
+
+        if bp.resize_chrome_window(width, height, x, y):
+            print(f"✓ Successfully resized to {width}x{height}")
+
+            # Show final window info
+            time.sleep(0.5)
+            info = bp.get_current_window_info()
+            if info:
+                print(f"Final window: {info['width']}x{info['height']} at ({info['x']}, {info['y']})")
+        else:
+            print("Failed to resize Chrome window", file=sys.stderr)
+            sys.exit(1)
+
+if __name__ == '__main__':
+    main()
