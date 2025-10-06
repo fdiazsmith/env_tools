@@ -1,0 +1,321 @@
+#!/usr/bin/env python3
+
+"""
+vidcli - Video CLI tool for video processing with ffmpeg
+"""
+
+import argparse
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+# Color codes for terminal output
+class Colors:
+    RED = '\033[0;31m'
+    GREEN = '\033[0;32m'
+    YELLOW = '\033[1;33m'
+    BLUE = '\033[0;34m'
+    NC = '\033[0m'  # No Color
+
+
+def print_error(message):
+    """Print error message in red"""
+    print(f"{Colors.RED}Error: {message}{Colors.NC}", file=sys.stderr)
+
+
+def print_success(message):
+    """Print success message in green"""
+    print(f"{Colors.GREEN}✓ {message}{Colors.NC}")
+
+
+def print_info(message):
+    """Print info message in blue"""
+    print(f"{Colors.BLUE}{message}{Colors.NC}")
+
+
+def print_warning(message):
+    """Print warning message in yellow"""
+    print(f"{Colors.YELLOW}⚠ {message}{Colors.NC}")
+
+
+def check_ffmpeg():
+    """Check if ffmpeg is installed"""
+    try:
+        subprocess.run(['ffmpeg', '-version'],
+                      stdout=subprocess.DEVNULL,
+                      stderr=subprocess.DEVNULL,
+                      check=True)
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+
+def get_video_info(input_file):
+    """Get video information using ffprobe"""
+    try:
+        result = subprocess.run([
+            'ffprobe', '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=width,height',
+            '-of', 'csv=p=0',
+            input_file
+        ], capture_output=True, text=True, check=True)
+
+        width, height = result.stdout.strip().split(',')
+        return int(width), int(height)
+    except Exception as e:
+        print_warning(f"Could not get video info: {e}")
+        return None, None
+
+
+def parse_resolution(res_string):
+    """Parse resolution string (e.g., '1920x1080') into width and height"""
+    try:
+        parts = res_string.lower().split('x')
+        if len(parts) != 2:
+            raise ValueError("Resolution must be in format WIDTHxHEIGHT")
+
+        width = int(parts[0])
+        height = int(parts[1])
+
+        if width <= 0 or height <= 0:
+            raise ValueError("Width and height must be positive numbers")
+
+        return width, height
+    except ValueError as e:
+        print_error(f"Invalid resolution format: {e}")
+        return None, None
+
+
+def optimize_for_web(input_file, output_file=None, resolution=None):
+    """
+    Convert video to web-optimized MP4 format
+
+    Args:
+        input_file: Path to input video file
+        output_file: Path to output file (optional)
+        resolution: Tuple of (width, height) or None to maintain original
+    """
+    # Validate input file
+    if not os.path.isfile(input_file):
+        print_error(f"Input file not found: {input_file}")
+        return False
+
+    # Generate output filename if not provided
+    if output_file is None:
+        input_path = Path(input_file)
+        output_file = str(input_path.parent / f"{input_path.stem}_web.mp4")
+
+    # Check if output file already exists
+    if os.path.exists(output_file):
+        response = input(f"{Colors.YELLOW}Output file '{output_file}' already exists. Overwrite? (y/n): {Colors.NC}")
+        if response.lower() not in ['y', 'yes']:
+            print("Operation cancelled.")
+            return False
+
+    # Build ffmpeg command
+    cmd = [
+        'ffmpeg',
+        '-i', input_file,
+        '-c:v', 'libx264',          # H.264 video codec
+        '-preset', 'medium',         # Encoding speed/compression tradeoff
+        '-crf', '23',                # Quality (lower = better, 23 is default)
+        '-c:a', 'aac',               # AAC audio codec
+        '-b:a', '128k',              # Audio bitrate
+        '-movflags', '+faststart',   # Enable fast start for web playback
+    ]
+
+    # Add resolution scaling if specified
+    if resolution:
+        width, height = resolution
+        cmd.extend(['-vf', f'scale={width}:{height}'])
+        print_info(f"Resizing to {width}x{height}")
+
+    # Add output file
+    cmd.extend(['-y', output_file])  # -y to overwrite without asking
+
+    # Show the command being executed
+    print_info(f"Converting: {os.path.basename(input_file)}")
+    if resolution:
+        print_info(f"Resolution: {resolution[0]}x{resolution[1]}")
+    else:
+        orig_width, orig_height = get_video_info(input_file)
+        if orig_width and orig_height:
+            print_info(f"Resolution: {orig_width}x{orig_height} (original)")
+
+    print_info(f"Output: {output_file}")
+    print()
+
+    try:
+        # Run ffmpeg
+        subprocess.run(cmd, check=True)
+        print()
+        print_success(f"Successfully created: {output_file}")
+
+        # Show file sizes
+        input_size = os.path.getsize(input_file) / (1024 * 1024)
+        output_size = os.path.getsize(output_file) / (1024 * 1024)
+        print_info(f"Input size:  {input_size:.2f} MB")
+        print_info(f"Output size: {output_size:.2f} MB")
+
+        if output_size < input_size:
+            savings = ((input_size - output_size) / input_size) * 100
+            print_success(f"Size reduced by {savings:.1f}%")
+
+        return True
+
+    except subprocess.CalledProcessError as e:
+        print_error(f"ffmpeg conversion failed: {e}")
+        return False
+    except KeyboardInterrupt:
+        print()
+        print_warning("Operation cancelled by user")
+        # Clean up partial output file
+        if os.path.exists(output_file):
+            os.remove(output_file)
+            print_info("Cleaned up partial output file")
+        return False
+
+
+def show_interactive_menu():
+    """Display interactive menu for video operations"""
+    while True:
+        print()
+        print(f"{Colors.GREEN}{'=' * 50}{Colors.NC}")
+        print(f"{Colors.GREEN}         vidcli - Video Processing Tool{Colors.NC}")
+        print(f"{Colors.GREEN}{'=' * 50}{Colors.NC}")
+        print()
+        print("Available operations:")
+        print()
+        print(f"  {Colors.BLUE}1.{Colors.NC} Optimize video for web (MP4)")
+        print(f"  {Colors.BLUE}2.{Colors.NC} Exit")
+        print()
+
+        try:
+            choice = input(f"Select an option (1-2): ").strip()
+
+            if choice == '1':
+                print()
+                input_file = input("Enter path to video file: ").strip()
+
+                if not input_file:
+                    print_error("No input file provided")
+                    continue
+
+                # Ask about resolution
+                resize = input("Resize video? (y/n): ").strip().lower()
+                resolution = None
+
+                if resize in ['y', 'yes']:
+                    res_input = input("Enter resolution (e.g., 1920x1080): ").strip()
+                    resolution = parse_resolution(res_input)
+                    if not resolution:
+                        continue
+
+                # Ask about output file
+                output_file = input("Output file (press Enter for auto-naming): ").strip()
+                if not output_file:
+                    output_file = None
+
+                print()
+                optimize_for_web(input_file, output_file, resolution)
+
+            elif choice == '2':
+                print("Goodbye!")
+                sys.exit(0)
+            else:
+                print_error("Invalid option")
+
+        except KeyboardInterrupt:
+            print()
+            print("Goodbye!")
+            sys.exit(0)
+
+
+def main():
+    """Main entry point"""
+    parser = argparse.ArgumentParser(
+        description='Video processing CLI tool using ffmpeg',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Interactive mode
+  vidcli
+
+  # Convert to web-optimized MP4 (same resolution)
+  vidcli --web video.mov
+
+  # Convert and resize to 1920x1080
+  vidcli --web video.mov --res 1920x1080
+
+  # Convert with custom output filename
+  vidcli --web video.mov --output optimized.mp4
+
+  # Convert and resize with custom output
+  vidcli --web video.mov --res 1280x720 --output small.mp4
+
+Output:
+  By default, output files are named '{input}_web.mp4' in the same directory.
+  Use --output to specify a custom output path.
+
+Web optimization:
+  - Codec: H.264 (libx264) with CRF 23
+  - Audio: AAC at 128kbps
+  - Container: MP4 with fast start enabled
+  - Optimized for streaming and web playback
+        """
+    )
+
+    parser.add_argument('--web', metavar='INPUT',
+                       help='Optimize video for web (converts to MP4)')
+
+    parser.add_argument('--res', '--resolution', metavar='WIDTHxHEIGHT',
+                       help='Resize video to specified resolution (e.g., 1920x1080)')
+
+    parser.add_argument('--output', '-o', metavar='FILE',
+                       help='Output file path')
+
+    # Parse arguments
+    args = parser.parse_args()
+
+    # Check if ffmpeg is installed
+    if not check_ffmpeg():
+        print_error("ffmpeg is not installed or not in PATH")
+        print_info("Install ffmpeg:")
+        print_info("  macOS:  brew install ffmpeg")
+        print_info("  Ubuntu: sudo apt install ffmpeg")
+        sys.exit(1)
+
+    # If no arguments provided, show interactive menu
+    if len(sys.argv) == 1:
+        show_interactive_menu()
+        return
+
+    # Handle --web command
+    if args.web:
+        resolution = None
+
+        # Parse resolution if provided
+        if args.res:
+            resolution = parse_resolution(args.res)
+            if not resolution:
+                sys.exit(1)
+
+        # Run optimization
+        success = optimize_for_web(args.web, args.output, resolution)
+        sys.exit(0 if success else 1)
+
+    # If --res or --output provided without --web, show error
+    if args.res or args.output:
+        print_error("--res and --output must be used with --web")
+        print_info("Usage: vidcli --web INPUT [--res WIDTHxHEIGHT] [--output FILE]")
+        sys.exit(1)
+
+    # Should not reach here, but just in case
+    parser.print_help()
+
+
+if __name__ == '__main__':
+    main()
