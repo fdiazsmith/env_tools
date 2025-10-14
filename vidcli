@@ -89,7 +89,7 @@ def parse_resolution(res_string):
         return None, None
 
 
-def optimize_for_web(input_file, output_file=None, resolution=None):
+def optimize_for_web(input_file, output_file=None, resolution=None, scale=None):
     """
     Convert video to web-optimized MP4 format
 
@@ -97,6 +97,7 @@ def optimize_for_web(input_file, output_file=None, resolution=None):
         input_file: Path to input video file
         output_file: Path to output file (optional)
         resolution: Tuple of (width, height) or None to maintain original
+        scale: Float multiplier to scale video dimensions (e.g., 0.5 for half size)
     """
     # Validate input file
     if not os.path.isfile(input_file):
@@ -132,6 +133,10 @@ def optimize_for_web(input_file, output_file=None, resolution=None):
         width, height = resolution
         cmd.extend(['-vf', f'scale={width}:{height}'])
         print_info(f"Resizing to {width}x{height}")
+    elif scale:
+        # Round to even numbers (required for H.264)
+        cmd.extend(['-vf', f'scale=trunc(iw*{scale}/2)*2:trunc(ih*{scale}/2)*2'])
+        print_info(f"Scaling by {scale}x")
 
     # Add output file
     cmd.extend(['-y', output_file])  # -y to overwrite without asking
@@ -250,11 +255,17 @@ Examples:
   # Convert and resize to 1920x1080
   vidcli --web video.mov --res 1920x1080
 
+  # Scale video by 0.5 (half size)
+  vidcli --web video.mov --scale 0.5
+
+  # Scale video by 2.0 (double size)
+  vidcli --web video.mov --scale 2.0
+
   # Convert with custom output filename
   vidcli --web video.mov --output optimized.mp4
 
-  # Convert and resize with custom output
-  vidcli --web video.mov --res 1280x720 --output small.mp4
+  # Convert and scale with custom output
+  vidcli --web video.mov --scale 0.5 --output small.mp4
 
 Output:
   By default, output files are named '{input}_web.mp4' in the same directory.
@@ -273,6 +284,9 @@ Web optimization:
 
     parser.add_argument('--res', '--resolution', metavar='WIDTHxHEIGHT',
                        help='Resize video to specified resolution (e.g., 1920x1080)')
+
+    parser.add_argument('--scale', type=float, metavar='MULTIPLIER',
+                       help='Scale video by multiplier (e.g., 0.5 for half size, 2.0 for double)')
 
     parser.add_argument('--output', '-o', metavar='FILE',
                        help='Output file path')
@@ -296,6 +310,7 @@ Web optimization:
     # Handle --web command
     if args.web:
         resolution = None
+        scale = None
 
         # Parse resolution if provided
         if args.res:
@@ -303,14 +318,26 @@ Web optimization:
             if not resolution:
                 sys.exit(1)
 
+        # Check for scale
+        if args.scale:
+            if args.scale <= 0:
+                print_error("Scale multiplier must be positive")
+                sys.exit(1)
+            scale = args.scale
+
+        # Check if both resolution and scale are specified
+        if args.res and args.scale:
+            print_error("Cannot use --res and --scale together. Choose one.")
+            sys.exit(1)
+
         # Run optimization
-        success = optimize_for_web(args.web, args.output, resolution)
+        success = optimize_for_web(args.web, args.output, resolution, scale)
         sys.exit(0 if success else 1)
 
-    # If --res or --output provided without --web, show error
-    if args.res or args.output:
-        print_error("--res and --output must be used with --web")
-        print_info("Usage: vidcli --web INPUT [--res WIDTHxHEIGHT] [--output FILE]")
+    # If --res, --scale, or --output provided without --web, show error
+    if args.res or args.scale or args.output:
+        print_error("--res, --scale, and --output must be used with --web")
+        print_info("Usage: vidcli --web INPUT [--res WIDTHxHEIGHT | --scale MULTIPLIER] [--output FILE]")
         sys.exit(1)
 
     # Should not reach here, but just in case
