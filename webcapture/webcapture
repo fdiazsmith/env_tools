@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# webcapture wrapper script
+# Activates venv and runs webcapture.py
+
+# Resolve symlinks to get actual script location
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+VENV_DIR="$SCRIPT_DIR/venv"
+PYTHON_SCRIPT="$SCRIPT_DIR/webcapture.py"
+
+# Check if venv exists
+if [ ! -d "$VENV_DIR" ]; then
+    echo "Error: Virtual environment not found. Run: cd $SCRIPT_DIR && ./install.sh"
+    exit 1
+fi
+
+# Activate venv and run script
+source "$VENV_DIR/bin/activate"
+exec python3 "$PYTHON_SCRIPT" "$@"
