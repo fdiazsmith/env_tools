@@ -5,6 +5,7 @@ imgcli - Image CLI tool for image processing
 """
 
 import argparse
+import glob
 import os
 import subprocess
 import sys
@@ -40,6 +41,27 @@ def print_warning(message):
     print(f"{Colors.YELLOW}⚠ {message}{Colors.NC}")
 
 
+def expand_pattern(pattern):
+    """
+    Expand a glob pattern to list of matching files
+
+    Args:
+        pattern: File path or glob pattern
+
+    Returns:
+        List of matching file paths, or [pattern] if no wildcards
+    """
+    # Check if pattern contains wildcard characters
+    if any(char in pattern for char in ['*', '?', '[']):
+        matches = glob.glob(pattern)
+        # Filter to only files (not directories)
+        matches = [f for f in matches if os.path.isfile(f)]
+        return sorted(matches)
+    else:
+        # No wildcards, return as-is
+        return [pattern] if pattern else []
+
+
 def check_imagemagick():
     """Check if ImageMagick (convert) is installed"""
     try:
@@ -52,7 +74,7 @@ def check_imagemagick():
         return False
 
 
-def convert_to_webp(input_file, output_file=None, scale=None):
+def convert_to_webp(input_file, output_file=None, scale=None, batch_mode=False):
     """
     Convert image to WebP format with optional scaling
 
@@ -60,6 +82,7 @@ def convert_to_webp(input_file, output_file=None, scale=None):
         input_file: Path to input image file
         output_file: Path to output WebP file (optional)
         scale: Scale multiplier (e.g., 0.5 for half size, 2.0 for double size)
+        batch_mode: If True, skip overwrite confirmation (default: False)
     """
     # Validate input file
     if not os.path.isfile(input_file):
@@ -75,8 +98,8 @@ def convert_to_webp(input_file, output_file=None, scale=None):
     if not output_file.lower().endswith('.webp'):
         output_file += '.webp'
 
-    # Check if output file already exists
-    if os.path.exists(output_file):
+    # Check if output file already exists (skip prompt in batch mode)
+    if os.path.exists(output_file) and not batch_mode:
         response = input(f"{Colors.YELLOW}Output file '{output_file}' already exists. Overwrite? (y/n): {Colors.NC}")
         if response.lower() not in ['y', 'yes']:
             print("Operation cancelled.")
@@ -129,7 +152,7 @@ def convert_to_webp(input_file, output_file=None, scale=None):
         return False
 
 
-def create_ico(input_file, output_file=None, sizes=None):
+def create_ico(input_file, output_file=None, sizes=None, batch_mode=False):
     """
     Convert image to ICO format with multiple resolutions
 
@@ -137,6 +160,7 @@ def create_ico(input_file, output_file=None, sizes=None):
         input_file: Path to input image file
         output_file: Path to output ICO file (optional)
         sizes: List of sizes to include (default: [16, 32, 48, 64, 128, 256])
+        batch_mode: If True, skip overwrite confirmation (default: False)
     """
     # Validate input file
     if not os.path.isfile(input_file):
@@ -156,8 +180,8 @@ def create_ico(input_file, output_file=None, sizes=None):
     if not output_file.lower().endswith('.ico'):
         output_file += '.ico'
 
-    # Check if output file already exists
-    if os.path.exists(output_file):
+    # Check if output file already exists (skip prompt in batch mode)
+    if os.path.exists(output_file) and not batch_mode:
         response = input(f"{Colors.YELLOW}Output file '{output_file}' already exists. Overwrite? (y/n): {Colors.NC}")
         if response.lower() not in ['y', 'yes']:
             print("Operation cancelled.")
@@ -180,6 +204,71 @@ def create_ico(input_file, output_file=None, sizes=None):
     # Show the command being executed
     print_info(f"Converting: {os.path.basename(input_file)} to ICO")
     print_info(f"Sizes: {', '.join(f'{s}x{s}' for s in sizes)}")
+    print_info(f"Output: {output_file}")
+    print()
+
+    try:
+        # Run ImageMagick convert
+        subprocess.run(cmd, check=True)
+        print()
+        print_success(f"Successfully created: {output_file}")
+
+        # Show file sizes
+        input_size = os.path.getsize(input_file) / 1024
+        output_size = os.path.getsize(output_file) / 1024
+        print_info(f"Input size:  {input_size:.2f} KB")
+        print_info(f"Output size: {output_size:.2f} KB")
+
+        return True
+
+    except subprocess.CalledProcessError as e:
+        print_error(f"ImageMagick conversion failed: {e}")
+        return False
+    except KeyboardInterrupt:
+        print()
+        print_warning("Operation cancelled by user")
+        # Clean up partial output file
+        if os.path.exists(output_file):
+            os.remove(output_file)
+            print_info("Cleaned up partial output file")
+        return False
+
+
+def resize_image(input_file, scale, output_file=None, batch_mode=False):
+    """
+    Resize image by scale multiplier
+
+    Args:
+        input_file: Path to input image file
+        scale: Scale multiplier (e.g., 0.5 for half size, 2.0 for double size)
+        output_file: Path to output file (optional)
+        batch_mode: If True, skip overwrite confirmation (default: False)
+    """
+    # Validate input file
+    if not os.path.isfile(input_file):
+        print_error(f"Input file not found: {input_file}")
+        return False
+
+    # Generate output filename if not provided
+    if output_file is None:
+        input_path = Path(input_file)
+        suffix = input_path.suffix
+        output_file = str(input_path.parent / f"{input_path.stem}_resized{suffix}")
+
+    # Check if output file already exists (skip prompt in batch mode)
+    if os.path.exists(output_file) and not batch_mode:
+        response = input(f"{Colors.YELLOW}Output file '{output_file}' already exists. Overwrite? (y/n): {Colors.NC}")
+        if response.lower() not in ['y', 'yes']:
+            print("Operation cancelled.")
+            return False
+
+    # Build ImageMagick command
+    scale_percent = int(scale * 100)
+    cmd = ['convert', input_file, '-resize', f'{scale_percent}%', output_file]
+
+    # Show the command being executed
+    print_info(f"Resizing: {os.path.basename(input_file)}")
+    print_info(f"Scale: {scale}x ({scale * 100:.0f}%)")
     print_info(f"Output: {output_file}")
     print()
 
@@ -310,6 +399,19 @@ Examples:
   # Interactive mode
   imgcli
 
+  # Resize single image
+  imgcli image.png --res 0.5
+
+  # Resize with custom output
+  imgcli image.png --res 2.0 --output large.png
+
+  # Resize multiple images (shell expands pattern)
+  imgcli IMG_26* --res 0.5
+  imgcli *.jpeg --res 2.0
+
+  # Resize with quoted pattern (prevents shell expansion)
+  imgcli "IMG_26*" --res 0.5
+
   # Convert to ICO with default sizes
   imgcli --ico image.png
 
@@ -347,6 +449,12 @@ WebP format:
         """
     )
 
+    parser.add_argument('images', nargs='*', metavar='IMAGE',
+                       help='Input image file(s) or pattern')
+
+    parser.add_argument('--res', type=float, metavar='MULTIPLIER',
+                       help='Resize image by multiplier (e.g., 0.5 for half size, 2.0 for double size)')
+
     parser.add_argument('--ico', metavar='INPUT',
                        help='Convert image to ICO format')
 
@@ -378,6 +486,75 @@ WebP format:
         show_interactive_menu()
         return
 
+    # Handle resize with positional images and --res flag
+    if args.images and args.res:
+        # Validate that --ico, --web, --scale, and --sizes are not used
+        if args.ico or args.web:
+            print_error("Cannot use --res with --ico or --web")
+            sys.exit(1)
+        if args.scale:
+            print_error("Cannot use --res with --scale")
+            sys.exit(1)
+        if args.sizes:
+            print_error("Cannot use --res with --sizes")
+            sys.exit(1)
+
+        # Validate res value
+        if args.res <= 0:
+            print_error("--res must be a positive number")
+            sys.exit(1)
+
+        # Expand all patterns to get list of files
+        files = []
+        for pattern in args.images:
+            expanded = expand_pattern(pattern)
+            files.extend(expanded)
+
+        if not files:
+            print_error(f"No files found matching pattern(s)")
+            sys.exit(1)
+
+        # If multiple files, show list and ask for confirmation
+        if len(files) > 1:
+            if args.output:
+                print_error("Cannot use --output with multiple input files")
+                sys.exit(1)
+
+            print_info(f"Found {len(files)} file(s) matching pattern:")
+            for f in files:
+                print(f"  - {f}")
+            print()
+            response = input(f"{Colors.YELLOW}Process all {len(files)} files? (y/n): {Colors.NC}")
+            if response.lower() not in ['y', 'yes']:
+                print("Operation cancelled.")
+                sys.exit(0)
+            print()
+
+        # Process files
+        success_count = 0
+        fail_count = 0
+
+        for idx, file in enumerate(files, 1):
+            if len(files) > 1:
+                print_info(f"Processing {idx}/{len(files)}: {os.path.basename(file)}")
+
+            success = resize_image(file, args.res, args.output if len(files) == 1 else None, batch_mode=len(files) > 1)
+
+            if success:
+                success_count += 1
+            else:
+                fail_count += 1
+
+            if len(files) > 1 and idx < len(files):
+                print()  # Blank line between files
+
+        # Show summary for batch operations
+        if len(files) > 1:
+            print()
+            print_success(f"Batch complete: {success_count} succeeded, {fail_count} failed")
+
+        sys.exit(0 if fail_count == 0 else 1)
+
     # Ensure --ico and --web are not used together
     if args.ico and args.web:
         print_error("Cannot use --ico and --web together")
@@ -403,9 +580,53 @@ WebP format:
                 print_error("Invalid sizes format. Use comma-separated integers (e.g., 16,32,48)")
                 sys.exit(1)
 
-        # Run ICO conversion
-        success = create_ico(args.ico, args.output, sizes)
-        sys.exit(0 if success else 1)
+        # Expand pattern to get list of files
+        files = expand_pattern(args.ico)
+
+        if not files:
+            print_error(f"No files found matching pattern: {args.ico}")
+            sys.exit(1)
+
+        # If multiple files, show list and ask for confirmation
+        if len(files) > 1:
+            if args.output:
+                print_error("Cannot use --output with multiple input files")
+                sys.exit(1)
+
+            print_info(f"Found {len(files)} file(s) matching pattern:")
+            for f in files:
+                print(f"  - {f}")
+            print()
+            response = input(f"{Colors.YELLOW}Process all {len(files)} files? (y/n): {Colors.NC}")
+            if response.lower() not in ['y', 'yes']:
+                print("Operation cancelled.")
+                sys.exit(0)
+            print()
+
+        # Process files
+        success_count = 0
+        fail_count = 0
+
+        for idx, file in enumerate(files, 1):
+            if len(files) > 1:
+                print_info(f"Processing {idx}/{len(files)}: {os.path.basename(file)}")
+
+            success = create_ico(file, args.output if len(files) == 1 else None, sizes, batch_mode=len(files) > 1)
+
+            if success:
+                success_count += 1
+            else:
+                fail_count += 1
+
+            if len(files) > 1 and idx < len(files):
+                print()  # Blank line between files
+
+        # Show summary for batch operations
+        if len(files) > 1:
+            print()
+            print_success(f"Batch complete: {success_count} succeeded, {fail_count} failed")
+
+        sys.exit(0 if fail_count == 0 else 1)
 
     # Handle --web command
     if args.web:
@@ -419,14 +640,59 @@ WebP format:
             print_error("Scale must be a positive number")
             sys.exit(1)
 
-        # Run WebP conversion
-        success = convert_to_webp(args.web, args.output, args.scale)
-        sys.exit(0 if success else 1)
+        # Expand pattern to get list of files
+        files = expand_pattern(args.web)
 
-    # If --sizes, --scale, or --output provided without --ico or --web, show error
-    if args.sizes or args.scale or args.output:
-        print_error("--sizes, --scale, and --output must be used with --ico or --web")
-        print_info("Usage: imgcli --ico INPUT [--sizes SIZE,SIZE,...] [--output FILE]")
+        if not files:
+            print_error(f"No files found matching pattern: {args.web}")
+            sys.exit(1)
+
+        # If multiple files, show list and ask for confirmation
+        if len(files) > 1:
+            if args.output:
+                print_error("Cannot use --output with multiple input files")
+                sys.exit(1)
+
+            print_info(f"Found {len(files)} file(s) matching pattern:")
+            for f in files:
+                print(f"  - {f}")
+            print()
+            response = input(f"{Colors.YELLOW}Process all {len(files)} files? (y/n): {Colors.NC}")
+            if response.lower() not in ['y', 'yes']:
+                print("Operation cancelled.")
+                sys.exit(0)
+            print()
+
+        # Process files
+        success_count = 0
+        fail_count = 0
+
+        for idx, file in enumerate(files, 1):
+            if len(files) > 1:
+                print_info(f"Processing {idx}/{len(files)}: {os.path.basename(file)}")
+
+            success = convert_to_webp(file, args.output if len(files) == 1 else None, args.scale, batch_mode=len(files) > 1)
+
+            if success:
+                success_count += 1
+            else:
+                fail_count += 1
+
+            if len(files) > 1 and idx < len(files):
+                print()  # Blank line between files
+
+        # Show summary for batch operations
+        if len(files) > 1:
+            print()
+            print_success(f"Batch complete: {success_count} succeeded, {fail_count} failed")
+
+        sys.exit(0 if fail_count == 0 else 1)
+
+    # If --sizes, --scale, --res, or --output provided without proper context
+    if args.sizes or args.scale or args.res or args.output:
+        print_error("Invalid flag combination")
+        print_info("Usage: imgcli IMAGE --res MULTIPLIER [--output FILE]")
+        print_info("       imgcli --ico INPUT [--sizes SIZE,SIZE,...] [--output FILE]")
         print_info("       imgcli --web INPUT [--scale MULTIPLIER] [--output FILE]")
         sys.exit(1)
 
