@@ -52,6 +52,150 @@ def check_ffmpeg():
         return False
 
 
+def get_image_sequence_info(folder_path):
+    """Get info about image sequence in folder"""
+    folder = Path(folder_path)
+    if not folder.is_dir():
+        return None, None, None
+
+    # supported image extensions
+    img_exts = {'.png', '.jpg', '.jpeg', '.tiff', '.tif', '.bmp', '.webp'}
+
+    # find all images
+    images = sorted([f for f in folder.iterdir()
+                     if f.suffix.lower() in img_exts])
+
+    if not images:
+        return None, None, None
+
+    # detect pattern - find common prefix and extension
+    ext = images[0].suffix
+    # check all have same extension
+    if not all(f.suffix == ext for f in images):
+        print_warning("Mixed image formats found, using first format")
+        images = [f for f in images if f.suffix == ext]
+
+    return images, ext, len(images)
+
+
+def get_image_dimensions(image_path):
+    """Get image dimensions using ffprobe"""
+    try:
+        result = subprocess.run([
+            'ffprobe', '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=width,height',
+            '-of', 'csv=p=0',
+            str(image_path)
+        ], capture_output=True, text=True, check=True)
+        width, height = result.stdout.strip().split(',')
+        return int(width), int(height)
+    except Exception:
+        return None, None
+
+
+def sequence_to_video(folder_path, output_file=None, fps=30, resolution=None, scale=None, bg_color='black'):
+    """
+    Convert image sequence to video
+
+    Args:
+        folder_path: Path to folder containing image sequence
+        output_file: Output video path (optional)
+        fps: Frames per second (default 30)
+        resolution: Tuple of (width, height) or None
+        scale: Float multiplier for scaling
+        bg_color: Background color for transparency (default 'black')
+    """
+    folder = Path(folder_path).resolve()
+
+    if not folder.is_dir():
+        print_error(f"Folder not found: {folder_path}")
+        return False
+
+    images, ext, count = get_image_sequence_info(folder)
+
+    if not images:
+        print_error(f"No images found in: {folder_path}")
+        return False
+
+    print_info(f"Found {count} images ({ext})")
+
+    # get dimensions from first image
+    img_w, img_h = get_image_dimensions(images[0])
+    if not img_w:
+        print_error("Could not determine image dimensions")
+        return False
+
+    print_info(f"Image size: {img_w}x{img_h}")
+
+    # generate output filename
+    if output_file is None:
+        output_file = str(folder.parent / f"{folder.name}_seq.mp4")
+
+    # check overwrite
+    if os.path.exists(output_file):
+        response = input(f"{Colors.YELLOW}Output '{output_file}' exists. Overwrite? (y/n): {Colors.NC}")
+        if response.lower() not in ['y', 'yes']:
+            print("Cancelled.")
+            return False
+
+    # build ffmpeg command using glob pattern
+    pattern = str(folder / f"*{ext}")
+
+    # build filter - composite on solid color to handle alpha
+    # then optionally scale
+    scale_filter = ''
+    if resolution:
+        width, height = resolution
+        scale_filter = f',scale={width}:{height}'
+        print_info(f"Resizing to {width}x{height}")
+    elif scale:
+        scale_filter = f',scale=trunc(iw*{scale}/2)*2:trunc(ih*{scale}/2)*2'
+        print_info(f"Scaling by {scale}x")
+
+    # alpha compositing: create solid bg, overlay images on it
+    filter_str = f'color=c={bg_color}:s={img_w}x{img_h}:r={fps}[bg];[bg][0:v]overlay=shortest=1{scale_filter}'
+    print_info(f"Background: {bg_color}")
+
+    cmd = [
+        'ffmpeg',
+        '-framerate', str(fps),
+        '-pattern_type', 'glob',
+        '-i', pattern,
+        '-filter_complex', filter_str,
+        '-c:v', 'libx264',
+        '-preset', 'medium',
+        '-crf', '23',
+        '-pix_fmt', 'yuv420p',
+        '-movflags', '+faststart',
+        '-y', output_file,
+    ]
+
+    print_info(f"Input: {folder}")
+    print_info(f"FPS: {fps}")
+    print_info(f"Output: {output_file}")
+    print()
+
+    try:
+        subprocess.run(cmd, check=True)
+        print()
+        print_success(f"Created: {output_file}")
+
+        output_size = os.path.getsize(output_file) / (1024 * 1024)
+        print_info(f"Output size: {output_size:.2f} MB")
+        return True
+
+    except subprocess.CalledProcessError as e:
+        print_error(f"ffmpeg failed: {e}")
+        return False
+    except KeyboardInterrupt:
+        print()
+        print_warning("Cancelled")
+        if os.path.exists(output_file):
+            os.remove(output_file)
+        return False
+
+
 def get_video_info(input_file):
     """Get video information using ffprobe"""
     try:
@@ -258,29 +402,36 @@ Examples:
   # Scale video by 0.5 (half size)
   vidcli --web video.mov --scale 0.5
 
-  # Scale video by 2.0 (double size)
-  vidcli --web video.mov --scale 2.0
+  # Image sequence to video (folder with images)
+  vidcli --seq ./frames/
 
-  # Convert with custom output filename
-  vidcli --web video.mov --output optimized.mp4
+  # Image sequence with custom fps
+  vidcli --seq ./frames/ --fps 60
 
-  # Convert and scale with custom output
-  vidcli --web video.mov --scale 0.5 --output small.mp4
+  # Image sequence with white background (for transparent PNGs)
+  vidcli --seq ./frames/ --bg white
+
+  # Image sequence with scaling
+  vidcli --seq ./frames/ --fps 24 --scale 0.5
 
 Output:
-  By default, output files are named '{input}_web.mp4' in the same directory.
-  Use --output to specify a custom output path.
-
-Web optimization:
-  - Codec: H.264 (libx264) with CRF 23
-  - Audio: AAC at 128kbps
-  - Container: MP4 with fast start enabled
-  - Optimized for streaming and web playback
+  --web: files named '{input}_web.mp4'
+  --seq: files named '{folder}_seq.mp4'
+  Use --output to specify custom path.
         """
     )
 
     parser.add_argument('--web', metavar='INPUT',
                        help='Optimize video for web (converts to MP4)')
+
+    parser.add_argument('--seq', metavar='FOLDER',
+                       help='Convert image sequence folder to video')
+
+    parser.add_argument('--fps', type=int, default=30, metavar='FPS',
+                       help='Frame rate for image sequence (default: 30)')
+
+    parser.add_argument('--bg', default='black', metavar='COLOR',
+                       help='Background color for transparent images (default: black)')
 
     parser.add_argument('--res', '--resolution', metavar='WIDTHxHEIGHT',
                        help='Resize video to specified resolution (e.g., 1920x1080)')
@@ -334,10 +485,32 @@ Web optimization:
         success = optimize_for_web(args.web, args.output, resolution, scale)
         sys.exit(0 if success else 1)
 
-    # If --res, --scale, or --output provided without --web, show error
-    if args.res or args.scale or args.output:
-        print_error("--res, --scale, and --output must be used with --web")
-        print_info("Usage: vidcli --web INPUT [--res WIDTHxHEIGHT | --scale MULTIPLIER] [--output FILE]")
+    # Handle --seq command
+    if args.seq:
+        resolution = None
+        scale = None
+
+        if args.res:
+            resolution = parse_resolution(args.res)
+            if not resolution:
+                sys.exit(1)
+
+        if args.scale:
+            if args.scale <= 0:
+                print_error("Scale multiplier must be positive")
+                sys.exit(1)
+            scale = args.scale
+
+        if args.res and args.scale:
+            print_error("Cannot use --res and --scale together. Choose one.")
+            sys.exit(1)
+
+        success = sequence_to_video(args.seq, args.output, args.fps, resolution, scale, args.bg)
+        sys.exit(0 if success else 1)
+
+    # If options provided without --web or --seq, show error
+    if args.res or args.scale or args.output or args.fps != 30:
+        print_error("--res, --scale, --output, --fps require --web or --seq")
         sys.exit(1)
 
     # Should not reach here, but just in case
