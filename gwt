@@ -1,0 +1,155 @@
+#!/bin/bash
+# Git worktree helper with Claude Code config support
+
+set -e
+
+# Determine repo root from current directory
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    echo "Error: not in a git repository"
+    exit 1
+}
+REPO_NAME="$(basename "$REPO_ROOT")"
+
+show_help() {
+    cat << EOF
+gwt - Git Worktree helper with Claude Code config support
+
+Usage:
+  gwt [options] <branch-name> [worktree-path]
+  gwt -d <worktree-path>
+
+Options:
+  -b          Create new branch
+  -d          Delete worktree (removes dir and cleans ~/.claude.json)
+  -h, --help  Show this help
+
+Arguments:
+  branch-name    Branch to checkout (or create with -b)
+  worktree-path  Optional, defaults to ../${REPO_NAME}-<branch>
+
+Examples:
+  gwt feature/auth          # checkout existing branch
+  gwt -b feature/new        # create new branch
+  gwt -d ../myrepo-feature  # delete worktree
+
+EOF
+}
+
+delete_worktree() {
+    local WORKTREE_PATH="$1"
+
+    if [[ -z "$WORKTREE_PATH" ]]; then
+        echo "Error: worktree path required for delete"
+        exit 1
+    fi
+
+    # Resolve to absolute path
+    if [[ "$WORKTREE_PATH" != /* ]]; then
+        WORKTREE_PATH="$(cd "$(dirname "$WORKTREE_PATH")" 2>/dev/null && pwd)/$(basename "$WORKTREE_PATH")"
+    fi
+
+    echo "Removing worktree: $WORKTREE_PATH"
+
+    # Remove git worktree (handle already-deleted dirs)
+    if [[ -d "$WORKTREE_PATH" ]]; then
+        git worktree remove "$WORKTREE_PATH" --force 2>/dev/null || rm -rf "$WORKTREE_PATH"
+    fi
+
+    # Prune stale worktree refs
+    git worktree prune
+
+    # Remove from ~/.claude.json if jq available
+    CLAUDE_CONFIG="$HOME/.claude.json"
+    if [[ -f "$CLAUDE_CONFIG" ]] && command -v jq &> /dev/null; then
+        TEMP_FILE=$(mktemp)
+        jq --arg path "$WORKTREE_PATH" 'del(.projects[$path])' "$CLAUDE_CONFIG" > "$TEMP_FILE" && mv "$TEMP_FILE" "$CLAUDE_CONFIG"
+        echo "Removed from ~/.claude.json"
+    fi
+
+    echo "Done (branch preserved)"
+}
+
+# Parse args
+DELETE_MODE=false
+NEW_BRANCH=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        -d)
+            DELETE_MODE=true
+            shift
+            ;;
+        -b)
+            NEW_BRANCH=true
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# Handle delete mode
+if $DELETE_MODE; then
+    delete_worktree "$1"
+    exit 0
+fi
+
+BRANCH="$1"
+WORKTREE_PATH="$2"
+
+if [[ -z "$BRANCH" ]]; then
+    show_help
+    exit 1
+fi
+
+# Default worktree path: sibling directory named <repo>-<branch>
+if [[ -z "$WORKTREE_PATH" ]]; then
+    SAFE_BRANCH=$(echo "$BRANCH" | tr '/' '-')
+    WORKTREE_PATH="$(dirname "$REPO_ROOT")/${REPO_NAME}-$SAFE_BRANCH"
+fi
+
+# Resolve to absolute path
+if [[ "$WORKTREE_PATH" != /* ]]; then
+    WORKTREE_PATH="$(cd "$(dirname "$WORKTREE_PATH")" 2>/dev/null && pwd)/$(basename "$WORKTREE_PATH")" || WORKTREE_PATH="$(pwd)/$WORKTREE_PATH"
+fi
+
+echo "Creating worktree at: $WORKTREE_PATH"
+echo "Branch: $BRANCH (new: $NEW_BRANCH)"
+
+# Create worktree
+if $NEW_BRANCH; then
+    git worktree add -b "$BRANCH" "$WORKTREE_PATH"
+else
+    git worktree add "$WORKTREE_PATH" "$BRANCH"
+fi
+
+# Copy .claude directory if exists
+if [[ -d "$REPO_ROOT/.claude" ]]; then
+    echo "Copying .claude/ to worktree..."
+    cp -r "$REPO_ROOT/.claude" "$WORKTREE_PATH/"
+fi
+
+# Copy .mcp.json if exists
+if [[ -f "$REPO_ROOT/.mcp.json" ]]; then
+    echo "Copying .mcp.json to worktree..."
+    cp "$REPO_ROOT/.mcp.json" "$WORKTREE_PATH/"
+fi
+
+# Add worktree to ~/.claude.json projects
+CLAUDE_CONFIG="$HOME/.claude.json"
+if [[ -f "$CLAUDE_CONFIG" ]] && command -v jq &> /dev/null; then
+    echo "Adding worktree to ~/.claude.json..."
+    MAIN_PROJECT_CONFIG=$(jq -r --arg path "$REPO_ROOT" '.projects[$path] // {}' "$CLAUDE_CONFIG")
+    TEMP_FILE=$(mktemp)
+    jq --arg path "$WORKTREE_PATH" \
+       --argjson config "$MAIN_PROJECT_CONFIG" \
+       '.projects[$path] = $config' "$CLAUDE_CONFIG" > "$TEMP_FILE" && mv "$TEMP_FILE" "$CLAUDE_CONFIG"
+fi
+
+echo ""
+echo "Done! cd $WORKTREE_PATH"
