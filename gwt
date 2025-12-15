@@ -125,7 +125,18 @@ echo "Branch: $BRANCH (new: $NEW_BRANCH)"
 if $NEW_BRANCH; then
     git worktree add -b "$BRANCH" "$WORKTREE_PATH"
 else
-    git worktree add "$WORKTREE_PATH" "$BRANCH"
+    # Check if branch exists locally, if not try to track from origin
+    if ! git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+        if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
+            echo "Branch exists on origin, tracking..."
+            git worktree add --track -b "$BRANCH" "$WORKTREE_PATH" "origin/$BRANCH"
+        else
+            echo "Error: branch '$BRANCH' not found locally or on origin"
+            exit 1
+        fi
+    else
+        git worktree add "$WORKTREE_PATH" "$BRANCH"
+    fi
 fi
 
 # Copy .claude directory if exists
