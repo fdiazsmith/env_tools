@@ -5,13 +5,6 @@
 
 set -e
 
-# Derive main repo from this script's git worktree list (first entry = main)
-MAIN_REPO="$(git -C "$(dirname "$0")" worktree list --porcelain 2>/dev/null | head -1 | sed 's/^worktree //')"
-if [ -z "$MAIN_REPO" ]; then
-    echo "Error: Could not detect main repo. Run from within a git repo or worktree."
-    exit 1
-fi
-
 # No arg = use current dir, otherwise use arg
 if [ -z "$1" ]; then
     WORKTREE="$(pwd)"
@@ -21,6 +14,13 @@ else
     if [[ "$WORKTREE" != /* ]]; then
         WORKTREE="$(cd "$WORKTREE" 2>/dev/null && pwd)" || { echo "Error: Cannot resolve path: $1"; exit 1; }
     fi
+fi
+
+# Derive main repo from the worktree's git worktree list (first entry = main)
+MAIN_REPO="$(git -C "$WORKTREE" worktree list --porcelain 2>/dev/null | head -1 | sed 's/^worktree //')"
+if [ -z "$MAIN_REPO" ]; then
+    echo "Error: Could not detect main repo. Run from within a git repo or worktree."
+    exit 1
 fi
 
 if [ ! -d "$WORKTREE" ]; then
