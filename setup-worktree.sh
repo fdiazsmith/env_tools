@@ -5,16 +5,21 @@
 
 set -e
 
-MAIN_REPO="/Users/fdiazsmith/Documents/soffi-main"
+# Derive main repo from this script's git worktree list (first entry = main)
+MAIN_REPO="$(git -C "$(dirname "$0")" worktree list --porcelain 2>/dev/null | head -1 | sed 's/^worktree //')"
+if [ -z "$MAIN_REPO" ]; then
+    echo "Error: Could not detect main repo. Run from within a git repo or worktree."
+    exit 1
+fi
 
 # No arg = use current dir, otherwise use arg
 if [ -z "$1" ]; then
     WORKTREE="$(pwd)"
 else
     WORKTREE="$1"
-    # Resolve relative paths
+    # Resolve relative paths relative to cwd
     if [[ "$WORKTREE" != /* ]]; then
-        WORKTREE="/Users/fdiazsmith/Documents/$WORKTREE"
+        WORKTREE="$(cd "$WORKTREE" 2>/dev/null && pwd)" || { echo "Error: Cannot resolve path: $1"; exit 1; }
     fi
 fi
 
